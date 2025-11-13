@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Riddle Wars</title>
+<style>
+/* === Original CSS untouched === */
+* { box-sizing: border-box; margin:0; padding:0; font-family:'Arial', sans-serif; }
+body {
+    background-color: #fdf6e3;
+    background-image: url('data:image/svg+xml;utf8,\
+    <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="none" stroke="%23e0dcd0" stroke-width="1">\
+    <circle cx="20" cy="20" r="15"/>\
+    <line x1="20" y1="35" x2="20" y2="40"/>\
+    <line x1="15" y1="20" x2="25" y2="20"/>\
+    </svg>');
+    background-repeat: repeat;
+    background-size: 60px 60px;
+    display: flex; flex-direction: column; min-height: 100vh; justify-content: space-between; align-items: center;
+}
+.top-bar { width:100%; background-color:#fff8e7; padding:15px; display:flex; justify-content:space-between; align-items:center; font-weight:bold; font-size:1rem; box-shadow:0 2px 4px rgba(0,0,0,0.1); }
+.menu, .riddle-container { flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; width:100%; gap:15px; padding:20px; }
+.btn { width:80%; max-width:300px; padding:15px; border:none; border-radius:12px; font-size:1.2rem; font-weight:bold; color:white; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; transition:transform 0.1s ease-in-out; }
+.btn:hover { transform:scale(1.05); }
+.play { background-color:#a8e6cf; color:#1b3b18; }       
+.create { background-color:#ffd3b6; color:#6b3b00; }     
+.join { background-color:#ffaaa5; color:#5a1c14; }       
+.solved { background-color:#ffeead; color:#5d4b00; }     
+.achievements { background-color:#ff8b94; color:#56000b; } 
+footer { width:100%; text-align:center; padding:10px; background-color:#fff8e7; font-size:0.9rem; box-shadow:0 -2px 4px rgba(0,0,0,0.1); }
+input[type="text"] { padding:10px; width:80%; max-width:300px; border-radius:8px; border:1px solid #ccc; font-size:1rem; }
+.hint-skip { display:flex; gap:15px; margin-top:10px; width:80%; max-width:300px; justify-content:space-between; }
+.hint-skip button { flex:1; font-size:1rem; }
+@media(max-width:400px){ .btn { font-size:1rem; padding:12px; } input[type="text"] { font-size:0.9rem; } }
+</style>
+</head>
+<body>
+
+<div class="top-bar">
+    <span id="streak">0-Day Streak</span>
+    <span id="coins">💰 1000 Coins</span>
+</div>
+
+<div id="main-content" class="menu">
+    <button class="btn play" onclick="startRiddle()">▶ Play</button>
+    <button class="btn create" onclick="createRoom()">🏠 Create Room</button>
+    <button class="btn join" onclick="joinRoom()">🔗 Join Room</button>
+    <button class="btn solved" onclick="goTo('Solved Riddles')">✅ Solved Riddles</button>
+    <button class="btn achievements" onclick="goTo('Achievements')">🏆 Achievements</button>
+</div>
+
+<footer>©2025 by Liz</footer>
+
+<script>
+// === Top bar & core variables ===
+const API_URL="https://riddles-api.vercel.app/random";
+let riddles=[],currentRiddle=0,coins=1000,streak=0,solvedRiddles=[],achievements=[
+{name:"First Riddle Solved",done:false,reward:100,check:()=>solvedRiddles.length>=1},
+{name:"5 Riddles Solved",done:false,reward:250,check:()=>solvedRiddles.length>=5},
+{name:"10 Riddles Solved",done:false,reward:500,check:()=>solvedRiddles.length>=10},
+{name:"50 Coins Earned",done:false,reward:0,check:()=>coins>=50}];
+let currentHintIndex=0,currentHints=[],hintPenalty=0;
+
+function updateTopBar(){ document.getElementById("coins").textContent=`💰 ${coins} Coins`; document.getElementById("streak").textContent=`${streak}-Day Streak`; }
+updateTopBar();
+
+// === Navigation ===
+function goHome(){
+    const main = document.getElementById("main-content");
+    main.innerHTML = `
+        <button class="btn play" onclick="startRiddle()">▶ Play</button>
+        <button class="btn create" onclick="createRoom()">🏠 Create Room</button>
+        <button class="btn join" onclick="joinRoom()">🔗 Join Room</button>
+        <button class="btn solved" onclick="goTo('Solved Riddles')">✅ Solved Riddles</button>
+        <button class="btn achievements" onclick="goTo('Achievements')">🏆 Achievements</button>
+    `;
+}
+
+function goTo(page){
+    if(page==="Solved Riddles") showSolvedRiddles();
+    else if(page==="Achievements") showAchievements();
+    else alert(page+" — Coming Soon!");
+}
+
+// === Normalization & fuzzy matching ===
+const numberWords={0:"zero",1:"one",2:"two",3:"three",4:"four",5:"five",6:"six",7:"seven",8:"eight",9:"nine",10:"ten"};
+function numberToWords(str){ str=str.trim(); if(numberWords[str])return numberWords[str]; if(/^\d+$/.test(str)){ let num=parseInt(str); return numberWords[num]||str; } return str; }
+function normalize(text){ text=text.toLowerCase().replace(/[^a-z0-9]/g,""); return numberToWords(text); }
+function levenshtein(a,b){ const matrix=Array.from({length:a.length+1},()=>Array(b.length+1).fill(0)); for(let i=0;i<=a.length;i++)matrix[i][0]=i; for(let j=0;j<=b.length;j++)matrix[0][j]=j; for(let i=1;i<=a.length;i++){ for(let j=1;j<=b.length;j++){ const cost=a[i-1]===b[j-1]?0:1; matrix[i][j]=Math.min(matrix[i-1][j]+1,matrix[i][j-1]+1,matrix[i-1][j-1]+cost); } } return matrix[a.length][b.length]; }
+function similarity(a,b){ a=normalize(a); b=normalize(b); const distance=levenshtein(a,b); return 1-distance/Math.max(a.length,b.length); }
+const synonyms={elevator:["lift"],garbage:["trash","rubbish"],sidewalk:["pavement","footpath"],chalkboard:["blackboard","board"],color:["colour"]};
+function checkSynonyms(input,answer){ input=normalize(input); answer=normalize(answer); if(input===answer)return true; if(synonyms[answer])return synonyms[answer].some(s=>normalize(s)===input); for(const key in synonyms){ if(synonyms[key].some(s=>normalize(s)===input)&&normalize(key)===answer) return true;} return false; }
+function generateHints(answer,question){ return ["Think about the main object mentioned in the riddle.",`The answer starts with "${answer.charAt(0).toUpperCase()}"`,`The answer has ${answer.length} letters.`]; }
+
+// === Single-player gameplay ===
+async function loadRiddle(){ try{ const res=await fetch(API_URL); const data=await res.json(); riddles=[{question:data.riddle,answer:data.answer.trim()}]; currentRiddle=0; currentHintIndex=0; hintPenalty=0; currentHints=generateHints(riddles[currentRiddle].answer,riddles[currentRiddle].question); showRiddle(currentRiddle); } catch(err){ alert("Could not load a riddle."); } }
+function startRiddle(){ loadRiddle(); }
+function showRiddle(index){ const main=document.getElementById("main-content"); main.innerHTML=`<div class="riddle-container"><p style="font-size:1.2rem;margin-bottom:15px;">💡 ${riddles[index].question}</p><input type="text" id="answer" placeholder="Type your answer..." /><button class="btn play" style="margin-top:10px;" onclick="checkAnswer()">Submit Answer</button><div class="hint-skip"><button class="btn create" onclick="useHint()">💡 Hint (-500 coins)</button><button class="btn join" onclick="skipRiddle()">⏭ Skip (-1500 coins)</button></div><p id="feedback" style="margin-top:10px;font-weight:bold;"></p><button class="btn achievements" style="margin-top:15px;" onclick="goHome()">🏠 Home</button></div>`; }
+function useHint(){ if(coins<500){alert("Not enough coins!"); return;} coins-=500; hintPenalty+=50; updateTopBar(); if(currentHintIndex>=currentHints.length){alert("No more hints!"); return;} alert(`💡 Hint: ${currentHints[currentHintIndex]}`); currentHintIndex++; }
+function checkAnswer(){ const input=document.getElementById("answer").value; const correct=riddles[currentRiddle].answer; const feedback=document.getElementById("feedback"); if(checkSynonyms(input,correct)||similarity(input,correct)>=0.7){ let reward=Math.max(500-hintPenalty,0); coins+=reward; streak++; if(!solvedRiddles.includes(riddles[currentRiddle].question)) solvedRiddles.push(riddles[currentRiddle].question); updateTopBar(); checkAchievements(); feedback.innerHTML=`✅ Correct! +${reward} Coins (Answer: ${correct})<br><button class="btn play" style="margin-top:10px;" onclick="loadRiddle()">▶ Next Riddle</button>`; }else{ streak=0; updateTopBar(); feedback.innerHTML=`❌ Wrong! The correct answer was: "${correct}".<br><button class="btn play" style="margin-top:10px;" onclick="loadRiddle()">▶ Next Riddle</button>`; } }
+function skipRiddle(){ if(coins>=1500){ coins-=1500; updateTopBar(); loadRiddle(); } else alert("Not enough coins to skip!"); }
+function checkAchievements(){ achievements.forEach(a=>{ if(!a.done&&a.check()){ a.done=true; if(a.reward>0){ coins+=a.reward; updateTopBar(); alert(`🏆 Achievement Unlocked: "${a.name}"! +${a.reward} Coins!`); }else alert(`🏆 Achievement Unlocked: "${a.name}"!`); } }); }
+function showSolvedRiddles(){ const main=document.getElementById("main-content"); if(solvedRiddles.length===0){ main.innerHTML=`<p style="margin-top:50px;font-size:1.2rem;">No solved riddles yet!</p><button class="btn play" onclick="startRiddle()" style="margin-top:15px;">▶ Back to Game</button><button class="btn achievements" style="margin-top:10px;" onclick="goHome()">🏠 Home</button>`; return;} main.innerHTML=`<div class="riddle-container"><h2>✅ Solved Riddles</h2><ul>${solvedRiddles.map(r=>`<li>${r}</li>`).join('')}</ul><button class="btn play" onclick="startRiddle()" style="margin-top:15px;">▶ Back to Game</button><button class="btn achievements" style="margin-top:10px;" onclick="goHome()">🏠 Home</button></div>`; }
+function showAchievements(){ const main=document.getElementById("main-content"); main.innerHTML=`<div class="riddle-container"><h2>🏆 Achievements</h2><ul>${achievements.map(a=>`<li>${a.done?"✅":"❌"} ${a.name}</li>`).join('')}</ul><button class="btn play" onclick="startRiddle()" style="margin-top:15px;">▶ Back to Game</button><button class="btn achievements" style="margin-top:10px;" onclick="goHome()">🏠 Home</button></div>`; }
+
+// === ROOM SYSTEM ===
+let rooms={};
+function generateRoomID(){ return Math.random().toString(36).substring(2,8).toUpperCase(); }
+function createRoom(){ const roomID=generateRoomID(); rooms[roomID]={players:[],currentRiddleIndex:0,riddles:[],coins:{}}; const playerName=prompt("Enter your name:"); if(!playerName)return alert("Name required!"); rooms[roomID].players.push(playerName); rooms[roomID].coins[playerName]=1000; alert(`Room created! ID: ${roomID}`); startRoomGame(roomID,playerName); }
+function joinRoom(){ const roomID=prompt("Enter Room ID:"); if(!roomID||!rooms[roomID]) return alert("Room not found!"); const playerName=prompt("Enter your name:"); if(!playerName) return alert("Name required!"); if(rooms[roomID].players.includes(playerName)) return alert("Name already in use!"); rooms[roomID].players.push(playerName); rooms[roomID].coins[playerName]=1000; alert(`Joined Room ${roomID} as ${playerName}`); startRoomGame(roomID,playerName); }
+async function startRoomGame(roomID,playerName){ const room=rooms[roomID]; if(room.riddles.length===0){ try{ const res=await fetch(API_URL); const data=await res.json(); room.riddles.push({question:data.riddle,answer:data.answer.trim()}); }catch(err){ return alert("Could not load riddle for room."); } } showRoomRiddle(roomID,playerName); }
+function showRoomRiddle(roomID,playerName){ const room=rooms[roomID]; const riddle=room.riddles[room.currentRiddleIndex]; currentHints=generateHints(riddle.answer,riddle.question); currentHintIndex=0; hintPenalty=0; const main=document.getElementById("main-content"); main.innerHTML=`<div class="riddle-container"><p style="font-size:1.2rem;margin-bottom:15px;">💡 ${riddle.question}</p><input type="text" id="answer" placeholder="Type your answer..." /><button class="btn play" style="margin-top:10px;" onclick="checkRoomAnswer('${roomID}','${playerName}')">Submit Answer</button><div class="hint-skip"><button class="btn create" onclick="useRoomHint('${roomID}','${playerName}')">💡 Hint (-500 coins)</button><button class="btn join" onclick="skipRoomRiddle('${roomID}','${playerName}')">⏭ Skip (-1500 coins)</button></div><p id="feedback" style="margin-top:10px;font-weight:bold;"></p><button class="btn achievements" style="margin-top:15px;" onclick="goHome()">🏠 Home</button></div>`; }
+function checkRoomAnswer(roomID,playerName){ const room=rooms[roomID]; const input=document.getElementById("answer").value; const correct=room.riddles[room.currentRiddleIndex].answer; const feedback=document.getElementById("feedback"); if(checkSynonyms(input,correct)||similarity(input,correct)>=0.7){ let reward=Math.max(500-hintPenalty,0); room.coins[playerName]+=reward; streak++; feedback.innerHTML=`✅ Correct! +${reward} Coins (Answer: ${correct})<br><button class="btn play" style="margin-top:10px;" onclick="nextRoomRiddle('${roomID}','${playerName}')">▶ Next Riddle</button>`; } else { feedback.innerHTML=`❌ Wrong! The correct answer was: "${correct}".<br><button class="btn play" style="margin-top:10px;" onclick="nextRoomRiddle('${roomID}','${playerName}')">▶ Next Riddle</button>`; } }
+async function nextRoomRiddle(roomID,playerName){ const room=rooms[roomID]; room.currentRiddleIndex++; try{ const res=await fetch(API_URL); const data=await res.json(); room.riddles.push({question:data.riddle,answer:data.answer.trim()}); }catch(err){ return alert("Could not load next riddle."); } showRoomRiddle(roomID,playerName); }
+function useRoomHint(roomID,playerName){ const room=rooms[roomID]; if(room.coins[playerName]<500){ alert("Not enough coins!"); return;} if(currentHintIndex>=currentHints.length){alert("No more hints!"); return;} room.coins[playerName]-=500; hintPenalty+=50; updateTopBar(); alert(`💡 Hint: ${currentHints[currentHintIndex]}`); currentHintIndex++; }
+</script>
+
+</body>
+</html>
